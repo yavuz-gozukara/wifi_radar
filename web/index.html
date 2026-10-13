@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wi-Fi CSI 3D Radar</title>
+  <style>
+    /* ── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #06080f;
+      --panel:     #0c1120;
+      --border:    #1a2540;
+      --accent:    #00e5ff;
+      --accent2:   #7c3aed;
+      --green:     #00ff88;
+      --red:       #ff4466;
+      --yellow:    #ffd700;
+      --text:      #c8d8f0;
+      --text-dim:  #4a6080;
+      --font:      'Courier New', monospace;
+    }
+    html, body { width: 100%; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; }
+
+    /* ── Layout ──────────────────────────────────── */
+    #app { display: flex; width: 100vw; height: 100vh; }
+
+    #sidebar {
+      width: 260px; min-width: 260px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      padding: 16px 12px;
+      overflow-y: auto;
+      z-index: 10;
+    }
+    #canvas-wrap { flex: 1; position: relative; }
+    #three-canvas { width: 100%; height: 100%; display: block; }
+
+    /* ── Sidebar bileşenleri ─────────────────────── */
+    .logo {
+      font-size: 12px; letter-spacing: 3px; text-transform: uppercase;
+      color: var(--accent); border-bottom: 1px solid var(--border);
+      padding-bottom: 10px; margin-bottom: 14px;
+    }
+    .logo span { color: var(--text-dim); }
+
+    .section { margin-bottom: 18px; }
+    .section-title {
+      font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--text-dim); margin-bottom: 8px;
+    }
+
+    /* Durum indikatörü */
+    .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-green  { background: var(--green);  box-shadow: 0 0 6px var(--green); }
+    .dot-yellow { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+    .dot-red    { background: var(--red);    box-shadow: 0 0 6px var(--red); }
+    .dot-gray   { background: var(--text-dim); }
+
+    /* Metrik kutuları */
+    .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .metric-box {
+      background: #080f1e; border: 1px solid var(--border);
+      border-radius: 4px; padding: 7px 8px;
+    }
+    .metric-label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+    .metric-value { font-size: 15px; color: var(--accent); margin-top: 2px; }
+
+    /* Nesne listesi */
+    .obj-list { display: flex; flex-direction: column; gap: 4px; }
+    .obj-item {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 10px; padding: 5px 7px;
+      background: #080f1e; border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+    .obj-swatch { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .obj-coords { color: var(--text-dim); font-size: 9px; }
+
+    /* Hareket skoru */
+    .score-bar-wrap { background: #080f1e; border-radius: 3px; height: 6px; overflow: hidden; margin-top: 4px; }
+    .score-bar { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); border-radius: 3px; transition: width 0.2s; }
+
+    /* FPS / frame */
+    .footer-row { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-dim); margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); }
+
+    /* ── Canvas overlay etiket ───────────────────── */
+    #overlay {
+      position: absolute; top: 14px; right: 16px;
+      font-size: 9px; color: var(--text-dim);
+      pointer-events: none; letter-spacing: 1px;
+    }
+
+    /* ── Bağlantı banner ─────────────────────────── */
+    #conn-banner {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(6,8,15,0.92); border: 1px solid var(--border);
+      border-radius: 8px; padding: 24px 32px; text-align: center;
+      pointer-events: none;
+    }
+    #conn-banner.hidden { display: none; }
+    #conn-banner p { color: var(--text-dim); font-size: 11px; margin-top: 8px; }
+    .spinner {
+      width: 28px; height: 28px; border: 2px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 1s linear infinite; margin: 0 auto 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sol Panel ─────────────────────────────────── -->
+  <aside id="sidebar">
+    <div class="logo">Wi-Fi CSI<br><span>3D Radar</span></div>
+
+    <!-- Bağlantı durumu -->
+    <div class="section">
+      <div class="section-title">Bağlantı</div>
+      <div class="status-row">
+        <div class="dot dot-gray" id="dot-sse"></div>
+        <span id="lbl-sse">Bağlanıyor…</span>
+      </div>
+      <div class="status-row">
+        <div class="dot dot-gray" id="dot-esp"></div>
+        <span id="lbl-esp">ESP32 —</span>
+      </div>
+    </div>
+
+    <!-- Metrikler -->
+    <div class="section">
+      <div class="section-title">Pipeline</div>
+      <div class="metrics-grid">
+        <div class="metric-box">
+          <div class="metric-label">FPS</div>
+          <div class="metric-value" id="m-fps">—</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Frame</div>
+          <div class="metric-value" id="m-frame">—</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Nesneler</div>
+          <div class="metric-value" id="m-obj">—</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">MUSIC</div>
+          <div class="metric-value" id="m-music">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hareket skoru -->
+    <div class="section">
+      <div class="section-title">Hareket Skoru</div>
+      <div id="m-hareket" style="font-size:13px; color:var(--accent)">—</div>
+      <div class="score-bar-wrap"><div class="score-bar" id="score-bar" style="width:0%"></div></div>
+    </div>
+
+    <!-- Nesne konumları -->
+    <div class="section">
+      <div class="section-title">Konum Tablosu</div>
+      <div class="obj-list" id="obj-list"></div>
+    </div>
+
+    <!-- CNN tahmini -->
+    <div class="section">
+      <div class="section-title">CNN Tahmini</div>
+      <div id="cnn-result" style="font-size:10px; color:var(--text-dim)">Model bekleniyor…</div>
+    </div>
+
+    <div class="footer-row">
+      <span id="f-zaman">—</span>
+      <span>Yavuz Selim Gözükara</span>
+    </div>
+  </aside>
+
+  <!-- ── 3D Canvas ──────────────────────────────────── -->
+  <div id="canvas-wrap">
+    <canvas id="three-canvas"></canvas>
+    <div id="overlay">SCROLL: zoom · DRAG: döndür · SHIFT+DRAG: kaydır</div>
+
+    <div id="conn-banner">
+      <div class="spinner"></div>
+      <div style="color:var(--accent); font-size:12px; letter-spacing:2px">BAĞLANIYOR</div>
+      <p>Sunucu: localhost:8765</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- Three.js CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Wi-Fi CSI 3D Radar — Web Arayüzü
+   Three.js r128 ile gerçek zamanlı 3D nokta bulutu görselleştirme
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const SSE_URL   = "http://localhost:8765/stream";
+const ODA_X     = 10.0;
+const ODA_Y     = 6.0;
+const ODA_Z     = 3.0;
+
+// ── Three.js Kurulum ─────────────────────────────────────────────────────────
+const canvas    = document.getElementById("three-canvas");
+const renderer  = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(canvas.offsetWidth, canvas.offsetHeight);
+renderer.setClearColor(0x06080f);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, canvas.offsetWidth / canvas.offsetHeight, 0.1, 200);
+camera.position.set(ODA_X * 0.6, -ODA_Y * 1.2, ODA_Z * 2.5);
+camera.lookAt(ODA_X / 2, ODA_Y / 2, ODA_Z / 2);
+
+// Işıklar
+scene.add(new THREE.AmbientLight(0x334466, 2.5));
+const dirL = new THREE.DirectionalLight(0x88bbff, 1.2);
+dirL.position.set(5, -10, 8);
+scene.add(dirL);
+
+// ── Orbit Kontrolleri (saf JS, OrbitControls olmadan) ────────────────────────
+let drag = false, shiftDrag = false;
+let lastMX = 0, lastMY = 0;
+let azim = Math.PI / 4, elev = Math.PI / 6, radius = 18, target = new THREE.Vector3(ODA_X/2, ODA_Y/2, ODA_Z/2);
+
+function updateCamera() {
+  const x = target.x + radius * Math.cos(elev) * Math.sin(azim);
+  const y = target.y - radius * Math.cos(elev) * Math.cos(azim);
+  const z = target.z + radius * Math.sin(elev);
+  camera.position.set(x, y, z);
+  camera.lookAt(target);
+}
+updateCamera();
+
+canvas.addEventListener("mousedown", e => { drag = true; shiftDrag = e.shiftKey; lastMX = e.clientX; lastMY = e.clientY; });
+window.addEventListener("mouseup",   () => { drag = false; });
+window.addEventListener("mousemove", e => {
+  if (!drag) return;
+  const dx = e.clientX - lastMX, dy = e.clientY - lastMY;
+  lastMX = e.clientX; lastMY = e.clientY;
+  if (shiftDrag) {
+    target.x -= dx * 0.02; target.y += dy * 0.02;
+  } else {
+    azim  += dx * 0.008;
+    elev  = Math.max(-1.3, Math.min(1.3, elev - dy * 0.008));
+  }
+  updateCamera();
+});
+canvas.addEventListener("wheel", e => {
+  radius = Math.max(3, Math.min(60, radius + e.deltaY * 0.05));
+  updateCamera(); e.preventDefault();
+}, { passive: false });
+
+window.addEventListener("resize", () => {
+  const w = canvas.offsetWidth, h = canvas.offsetHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+});
+
+// ── Oda Çerçevesi ────────────────────────────────────────────────────────────
+const wireMatl = new THREE.LineBasicMaterial({ color: 0x1a2540 });
+function addLine(x1,y1,z1,x2,y2,z2) {
+  const g = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(x1,y1,z1), new THREE.Vector3(x2,y2,z2)
+  ]);
+  scene.add(new THREE.Line(g, wireMatl));
+}
+const [X,Y,Z] = [ODA_X, ODA_Y, ODA_Z];
+// Zemin
+addLine(0,0,0, X,0,0); addLine(X,0,0, X,Y,0); addLine(X,Y,0, 0,Y,0); addLine(0,Y,0, 0,0,0);
+// Tavan
+addLine(0,0,Z, X,0,Z); addLine(X,0,Z, X,Y,Z); addLine(X,Y,Z, 0,Y,Z); addLine(0,Y,Z, 0,0,Z);
+// Dikmeler
+[[0,0],[X,0],[X,Y],[0,Y]].forEach(([px,py]) => addLine(px,py,0, px,py,Z));
+
+// Eksen etiketleri (küçük renkli çizgiler)
+const axGeo = new THREE.BufferGeometry();
+const axVerts = new Float32Array([0,0,0.1, 1.5,0,0.1,  0,0,0.1, 0,1.5,0.1,  0,0,0.1, 0,0,1.6]);
+axGeo.setAttribute("position", new THREE.BufferAttribute(axVerts, 3));
+const axMatl = new THREE.LineBasicMaterial({ vertexColors: true });
+const axCols = new Float32Array([1,0,0, 1,0,0,  0,1,0, 0,1,0,  0,0.6,1, 0,0.6,1]);
+axGeo.setAttribute("color", new THREE.BufferAttribute(axCols, 3));
+scene.add(new THREE.LineSegments(axGeo, axMatl));
+
+// ── Nokta Bulutu (nesneler) ──────────────────────────────────────────────────
+const MAX_PTS = 512;
+const ptPositions = new Float32Array(MAX_PTS * 3);
+const ptColors    = new Float32Array(MAX_PTS * 3);
+const ptGeo       = new THREE.BufferGeometry();
+ptGeo.setAttribute("position", new THREE.BufferAttribute(ptPositions, 3));
+ptGeo.setAttribute("color",    new THREE.BufferAttribute(ptColors,    3));
+ptGeo.setDrawRange(0, 0);
+
+const ptMatl = new THREE.PointsMaterial({
+  size: 0.25, vertexColors: true,
+  transparent: true, opacity: 0.9,
+  sizeAttenuation: true,
+});
+const pointCloud = new THREE.Points(ptGeo, ptMatl);
+scene.add(pointCloud);
+
+// ── MUSIC küreleri ───────────────────────────────────────────────────────────
+const musicMeshes = [];
+const musicMatl   = new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.6, wireframe: false });
+for (let i = 0; i < 8; i++) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), musicMatl.clone());
+  m.visible = false;
+  scene.add(m);
+  musicMeshes.push(m);
+}
+
+// ── CNN küreleri ─────────────────────────────────────────────────────────────
+const cnnMeshes = [];
+const cnnMatl   = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.8 });
+for (let i = 0; i < 4; i++) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6), cnnMatl.clone());
+  m.visible = false;
+  scene.add(m);
+  cnnMeshes.push(m);
+}
+
+// ── Render döngüsü ───────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+
+// ── SSE Bağlantısı ───────────────────────────────────────────────────────────
+let sseRetries  = 0;
+let lastFrame   = 0;
+let lastTime    = performance.now();
+let fps         = 0;
+
+function setSSEStatus(ok) {
+  const dot = document.getElementById("dot-sse");
+  const lbl = document.getElementById("lbl-sse");
+  dot.className = "dot " + (ok ? "dot-green" : "dot-red");
+  lbl.textContent = ok ? "SSE Bağlı" : "Bağlantı Kesildi";
+  document.getElementById("conn-banner").classList.toggle("hidden", ok);
+}
+
+function baglanti() {
+  const es = new EventSource(SSE_URL);
+
+  es.onopen = () => { sseRetries = 0; setSSEStatus(true); };
+
+  es.onmessage = e => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+
+    // FPS hesapla
+    const now = performance.now();
+    fps = Math.round(1000 / Math.max(1, now - lastTime));
+    lastTime = now;
+
+    veriGuncelle(data, fps);
+  };
+
+  es.onerror = () => {
+    setSSEStatus(false);
+    es.close();
+    const bekleme = Math.min(5000, 500 * (++sseRetries));
+    setTimeout(baglanti, bekleme);
+  };
+}
+baglanti();
+
+// ── Veri işleme ──────────────────────────────────────────────────────────────
+function veriGuncelle(data, fps) {
+  const { frame, nesneler = [], music = [], cnn = [], hareket_skoru = 0 } = data;
+
+  // Nokta bulutu — nesneler
+  let ptIdx = 0;
+  nesneler.forEach(n => {
+    if (ptIdx >= MAX_PTS) return;
+    ptPositions[ptIdx*3]   = n.x;
+    ptPositions[ptIdx*3+1] = n.y;
+    ptPositions[ptIdx*3+2] = n.z;
+    const [r,g,b] = n.renk || [1,1,1];
+    ptColors[ptIdx*3]   = r;
+    ptColors[ptIdx*3+1] = g;
+    ptColors[ptIdx*3+2] = b;
+    ptIdx++;
+  });
+  ptGeo.setDrawRange(0, ptIdx);
+  ptGeo.attributes.position.needsUpdate = true;
+  ptGeo.attributes.color.needsUpdate    = true;
+
+  // MUSIC küreleri
+  music.forEach((k, i) => {
+    if (i >= musicMeshes.length) return;
+    musicMeshes[i].position.set(k.x, k.y, k.z);
+    musicMeshes[i].visible = true;
+    const s = 0.15 + k.guc * 0.5;
+    musicMeshes[i].scale.setScalar(s);
+  });
+  for (let i = music.length; i < musicMeshes.length; i++) musicMeshes[i].visible = false;
+
+  // CNN küreleri
+  cnn.forEach((k, i) => {
+    if (i >= cnnMeshes.length) return;
+    cnnMeshes[i].position.set(k.x, k.y, k.z);
+    cnnMeshes[i].visible = true;
+  });
+  for (let i = cnn.length; i < cnnMeshes.length; i++) cnnMeshes[i].visible = false;
+
+  // ── Sidebar güncelle ─────────────────────────────────────────────────────
+  document.getElementById("m-fps").textContent   = fps;
+  document.getElementById("m-frame").textContent = frame;
+  document.getElementById("m-obj").textContent   = nesneler.length;
+  document.getElementById("m-music").textContent = music.length;
+
+  const scorePct = Math.min(100, hareket_skoru * 8).toFixed(0);
+  document.getElementById("m-hareket").textContent  = hareket_skoru.toFixed(4);
+  document.getElementById("score-bar").style.width  = scorePct + "%";
+
+  // Nesne listesi
+  const liste = document.getElementById("obj-list");
+  liste.innerHTML = nesneler.map(n => {
+    const hex = rgbToHex(n.renk || [1,1,1]);
+    return `<div class="obj-item">
+      <div class="obj-swatch" style="background:${hex}"></div>
+      <div>
+        <div>${n.ad}</div>
+        <div class="obj-coords">(${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)})</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  // CNN sonucu
+  const cnnDiv = document.getElementById("cnn-result");
+  if (cnn.length > 0) {
+    const k = cnn[0];
+    cnnDiv.innerHTML = `<span style="color:var(--accent)">✓</span> (${k.x.toFixed(2)}, ${k.y.toFixed(2)}, ${k.z.toFixed(2)})`;
+  } else {
+    cnnDiv.textContent = "Model bekleniyor…";
+  }
+
+  // Zaman
+  const d = new Date(data.zaman_ms);
+  document.getElementById("f-zaman").textContent =
+    d.toLocaleTimeString("tr-TR", { hour12: false });
+}
+
+function rgbToHex([r,g,b]) {
+  const ti = v => Math.round(v * 255).toString(16).padStart(2, "0");
+  return "#" + ti(r) + ti(g) + ti(b);
+}
+</script>
+</body>
+</html>

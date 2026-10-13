@@ -4,7 +4,8 @@ from .csi import CSIHesaplayici
 from .arka_plan import ArkaplanCikarici
 from .music import MUSICTahminci
 from .kalman import KalmanIzleyici, CokluIzleyici
-from .esp32_arayuz import SimulasyonArayuz, ESP32SerialArayuz, ESP32UDPArayuz
+from .esp32_arayuz  import SimulasyonArayuz, ESP32SerialArayuz, ESP32UDPArayuz
+from .cnn_tahminci  import CNNTahminci
 
 __all__ = [
     "Nesne",
@@ -16,4 +17,5 @@ __all__ = [
     "SimulasyonArayuz",
     "ESP32SerialArayuz",
     "ESP32UDPArayuz",
+    "CNNTahminci",
 ]
