@@ -22,7 +22,7 @@ class WiFiConfig:
 
 class SimulasyonConfig:
     FPS_HEDEF = 30
-    IZ_UZUNLUGU = 80
+    IZ_UZUNLUGU = 35     # Daha kısa iz — renk ayrımı netleşir
     GURULTU_CARPANI = 0.01
     EMA_ALFA = 0.01
 
@@ -30,5 +30,5 @@ class GoruntuConfig:
     PENCERE_GENISLIK = 1280
     PENCERE_YUKSEKLIK = 720
     ARKA_PLAN = [0.02, 0.02, 0.05]
-    NOKTA_BOYUTU = 4.0
-    NOKTA_YOGUNLUGU = 60
+    NOKTA_BOYUTU = 6.0
+    NOKTA_YOGUNLUGU = 80
